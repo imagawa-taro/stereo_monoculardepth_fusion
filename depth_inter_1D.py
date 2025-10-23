@@ -204,6 +204,86 @@ def restore_1d_filter(pd, da, lam=100.0, threshold=1.0, num_passes=1, clip_range
         Xprev[:] = Xnew
     return Xnew
 
+def restore_1d_filter_fast(pd, da, lam=100.0, threshold=1.0, num_passes=1, clip_range=None):
+    """
+    ベクトル化した1次元「一回パス」近似フィルタ（Jacobi型の局所フィルタを反復）。
+    2D式の1D対応:
+      - J1 -> pd（データ項）
+      - J2 -> da（ガイド勾配）
+      - wx(i) -> lam * W2(i)（位置ごとの勾配重み、非負）
+      - 近傍: iL=max(i-1,0), iR=min(i+1,N-1)
+      - denom(i) = 1 + wx(iL) + wx(i)
+    1パス更新:
+    x[i] = [ pd[i]
+            + wx(iL) * ( Xprev[iL] + da[i] - da[iL] )
+            + wx(i)  * ( Xprev[iR] + da[i] - da[iR] ) ] / denom(i)
+
+    num_passes 回、同じ局所演算を反復（2〜3回程度で十分なことが多い）。
+
+    引数:
+    - lam: 勾配項の強さ
+    - threshold: W2 作成時の差分閾値
+    - num_passes: フィルタの繰り返し回数
+    - clip_range: (min, max)。None の場合は pd/da のレンジで自動。
+
+    戻り値:
+    - x: 復元信号（np.float32）
+    """
+    import numpy as np
+
+    pd = np.asarray(pd, dtype=np.float32).copy()
+    da = np.asarray(da, dtype=np.float32).copy()
+    N = len(pd)
+
+    if N == 0:
+        return pd.copy()
+    if N == 1:
+        return pd.copy()
+
+    # 重み（W2）を作成（da の差分が大きい箇所を弱める）
+    def _make_weights_1d(da_, threshold_):
+        W2_ = np.ones(len(da_), dtype=np.float32)
+        da_dx = np.abs(np.diff(da_, prepend=da_[:1]))
+        W2_[da_dx > threshold_] = 0.01
+        return W2_
+
+    W2 = _make_weights_1d(da, threshold)
+    W2 = np.clip(W2, 0.0, np.finfo(np.float32).max)
+    wx = lam * W2  # 位置ごとの勾配重み（非負）
+
+    # クリップ範囲
+    if clip_range is None:
+        vmin = float(min(pd.min(), da.min()))
+        vmax = float(max(pd.max(), da.max()))
+    else:
+        vmin, vmax = clip_range
+
+    # 近傍インデックス（Neumann相当のクリップ）
+    idxL = np.empty(N, dtype=np.int64)
+    idxR = np.empty(N, dtype=np.int64)
+    idxL[0] = 0
+    idxL[1:] = np.arange(N - 1)
+    idxR[:-1] = np.arange(1, N)
+    idxR[-1] = N - 1
+
+    # 反復で不変な項を事前計算
+    wL = wx[idxL]          # 左側に対応する重み wx(iL)
+    wR = wx                # 右側に対応する重み wx(i)
+    denom = 1.0 + wL + wR  # 各点の分母（一定）
+    da_L = da[idxL]
+    da_R = da[idxR]
+    dL = da - da_L         # da[i] - da[iL]
+    dR = da - da_R         # da[i] - da[iR]
+
+    # Jacobi 反復
+    Xprev = pd.copy()
+    for _ in range(max(1, int(num_passes))):
+        X_L = Xprev[idxL]
+        X_R = Xprev[idxR]
+        num = pd + wL * (X_L + dL) + wR * (X_R + dR)
+        Xprev = np.clip(num / denom, vmin, vmax)
+    return Xprev
+
 def set_gt(N):
     """
     デモ用のGT信号を設定
@@ -215,7 +295,6 @@ def set_gt(N):
         gt[ww + i] = 30 + 15.0 * np.sin(np.pi * i / ww)  # 半円形
         gt[3*ww + i] = 30 + 15.0 * np.sin(np.pi * i / ww)  # 半円形
     return gt
-
 
 def set_pd(gt):
     """
@@ -258,10 +337,14 @@ def demo():
     # PDの設定
     pd = set_pd(gt)
 
+    time0 = time.time()
     # 復元
-    # x_rest, loss_history = restore_1d(pd, da, lam=100.0, lr=1, num_iters=800, threshold=8.0, verbose=True)
     loss_history = None
-    x_rest = restore_1d_filter(pd, da, lam=100.0, threshold=8.0, num_passes=100, clip_range=None)
+    # x_rest, loss_history = restore_1d(pd, da, lam=100.0, lr=1, num_iters=800, threshold=8.0, verbose=True)
+    # x_rest = restore_1d_filter(pd, da, lam=500.0, threshold=8.0, num_passes=10, clip_range=None)
+    x_rest = restore_1d_filter_fast(pd, da, lam=500.0, threshold=8.0, num_passes=100, clip_range=None)
+    print(f"Total elapsed time: {time.time() - time0:.3f} sec")
+
     # プロット表示
     plt.figure(figsize=(10, 6))
     plt.plot(gt, label='Ground Truth (gt)', linestyle='-', marker='o', markersize=2)
