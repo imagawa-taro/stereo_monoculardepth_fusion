@@ -126,6 +126,83 @@ def restore_1d(pd, da, lam=100.0, lr=0.1, num_iters=1000, threshold=1.0, clip_ra
         print(f"Elapsed time: {time.time() - t0:.3f} sec")
     return x, loss_history
 
+def restore_1d_filter(pd, da, lam=100.0, threshold=1.0, num_passes=1, clip_range=None):
+    """
+    1次元版の「一回パス」近似フィルタ。
+    2D式の対応:
+    - J1 -> pd（データ項）
+    - J2 -> da（ガイドの勾配項）
+    - wx(x) -> lam * W2(x)（位置ごとの勾配重み。非負）
+    - 近傍: 左 iL=max(i-1,0), 右 iR=min(i+1,N-1)
+    - denom(i) = 1 + wx(i) + wx(iL)
+    1パスの更新:
+    x[i] = [ pd[i]
+            + wx(iL) * ( Xprev[iL] + da[i] - da[iL] )
+            + wx(i)  * ( Xprev[iR] + da[i] - da[iR] ) ] / denom(i)
+
+    num_passes 回繰り返し:
+    Jacobi法の近似に対応。Xprev の初期値は pd（J1）に設定。
+    中央の pd[i] は常にデータ項として固定。
+
+    引数:
+    - lam: 勾配項の強さ（wx に掛ける係数）
+    - threshold: W2（位置重み）作成時の差分閾値
+    - num_passes: フィルタの繰り返し回数（1〜3程度を推奨）
+    - clip_range: 出力のクリップ範囲 (min, max)。Noneなら pd/da のレンジで自動。
+
+    戻り値:
+    - x: フィルタ復元信号
+    """
+    pd = np.asarray(pd, dtype=np.float32).copy()
+    da = np.asarray(da, dtype=np.float32).copy()
+    N = len(pd)
+    if N == 0:
+        return pd.copy()
+    if N == 1:
+        # 近傍が無いので素直にデータ項のみ
+        return pd.copy()
+
+    # 重み（make_weights_1d を利用）
+    _, W2 = make_weights_1d(da, threshold=threshold)
+    # 非負・有限の保証（念のため）
+    W2 = np.clip(W2, 0.0, np.finfo(np.float32).max)
+
+    # wx = lam * W2（2Dの wx(x) に相当）
+    wx = lam * W2
+
+    # クリップ範囲
+    if clip_range is None:
+        vmin = float(min(pd.min(), da.min()))
+        vmax = float(max(pd.max(), da.max()))
+    else:
+        vmin, vmax = clip_range
+
+    # Jacobi近似の初期値：近傍代入用 Xprev は J1（pd）
+    Xprev = pd.copy()
+    Xnew = np.zeros_like(pd, dtype=np.float32)
+
+    for _ in range(max(1, int(num_passes))):
+        # 各点で近傍アクセスのみ（O(N)）
+        for i in range(N):
+            iL = i - 1 if i > 0 else 0
+            iR = i + 1 if i < N - 1 else N - 1
+
+            wL = wx[iL]  # 左の重み（2D式の wx(xl,y)）
+            wR = wx[i]   # 右の重み（2D式の wx(x,y)）
+
+            denom = 1.0 + wL + wR
+            # 出力の分子（2D式に準拠、J1は常にpd、近傍はXprevで代入）
+            num = (
+                pd[i]
+                + wL * (Xprev[iL] + da[i] - da[iL])
+                + wR * (Xprev[iR] + da[i] - da[iR])
+            )
+            Xnew[i] = num / denom
+
+        # クリップと、次パス用の更新
+        Xnew = np.clip(Xnew, vmin, vmax)
+        Xprev[:] = Xnew
+    return Xnew
 
 def set_gt(N):
     """
@@ -182,8 +259,9 @@ def demo():
     pd = set_pd(gt)
 
     # 復元
-    x_rest, loss_history = restore_1d(pd, da, lam=100.0, lr=1, num_iters=800, threshold=8.0, verbose=True)
-
+    # x_rest, loss_history = restore_1d(pd, da, lam=100.0, lr=1, num_iters=800, threshold=8.0, verbose=True)
+    loss_history = None
+    x_rest = restore_1d_filter(pd, da, lam=100.0, threshold=8.0, num_passes=100, clip_range=None)
     # プロット表示
     plt.figure(figsize=(10, 6))
     plt.plot(gt, label='Ground Truth (gt)', linestyle='-', marker='o', markersize=2)
@@ -196,12 +274,13 @@ def demo():
     plt.ylabel('Depth Value')
     plt.grid()
 
-    plt.figure(figsize=(6,4))
-    plt.plot(loss_history)
-    plt.title('Loss History')
-    plt.xlabel('Iteration')
-    plt.ylabel('Loss')
-    plt.grid()
+    if loss_history is not None:
+        plt.figure(figsize=(6,4))
+        plt.plot(loss_history)
+        plt.title('Loss History')
+        plt.xlabel('Iteration')
+        plt.ylabel('Loss')
+        plt.grid()
     plt.show()
 
 if __name__ == "__main__":
