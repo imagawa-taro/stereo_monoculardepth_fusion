@@ -16,7 +16,7 @@ def make_weights_1d(da, threshold=1.0):
     W2 = np.ones(N, dtype=np.float32)
     da_dx = np.abs(np.diff(da, prepend=da[:1]))  # 長さN、先頭は0差分
     # 差分が大きい場所の右側インデックスに対応する重みを小さく
-    W2[da_dx > threshold] = 0.01
+    W2[da_dx > threshold] = 0.001
 
     return W1, W2
 
@@ -244,7 +244,7 @@ def restore_1d_filter_fast(pd, da, lam=100.0, threshold=1.0, num_passes=1, clip_
     def _make_weights_1d(da_, threshold_):
         W2_ = np.ones(len(da_), dtype=np.float32)
         da_dx = np.abs(np.diff(da_, prepend=da_[:1]))
-        W2_[da_dx > threshold_] = 0.01
+        W2_[da_dx > threshold_] = 0.001
         return W2_
 
     W2 = _make_weights_1d(da, threshold)
@@ -284,44 +284,7 @@ def restore_1d_filter_fast(pd, da, lam=100.0, threshold=1.0, num_passes=1, clip_
         Xprev = np.clip(num / denom, vmin, vmax)
     return Xprev
 
-def set_gt(N):
-    """
-    デモ用のGT信号を設定
-    gt: 段差を含む信号
-    """
-    ww = N // 5
-    gt = np.zeros(N, dtype=np.float32)
-    for i in range(ww):
-        gt[ww + i] = 30 + 15.0 * np.sin(np.pi * i / ww)  # 半円形
-        gt[3*ww + i] = 30 + 15.0 * np.sin(np.pi * i / ww)  # 半円形
-    return gt
-
-def set_pd(gt):
-    """
-    デモ用の観測信号 pd を設定
-    pd: gt をぼかし＋量子化＋ノイズ
-    """
-    np.random.seed(1)
-    # ぼかし
-    kernel_size = 5
-    kernel = np.ones(kernel_size) / kernel_size
-    pd = gt.copy()
-    pd = np.convolve(pd, kernel, mode='same')
-    # 量子化
-    pd = np.round(pd / 5.0) * 5.0
-    # ノイズ
-    pd += np.random.normal(0, 2.0, size=len(pd)).astype(np.float32)
-    return pd
-
-def set_da(gt):
-    """
-    デモ用のガイド信号 da を設定
-    da: gt の後ろ半分の段差を10低くする
-    """
-    da = gt.copy()
-    N = len(da)
-    da[N//2:] = np.maximum(da[N//2:] - 20, 0)
-    return da
+from set_data import set_gt, set_pd, set_da
 
 def demo():
     """
@@ -329,7 +292,7 @@ def demo():
     da: 形状ガイド(段差を含む信号)
     pd: 観測(daとスケールがズレておりノイズも乗っている)
     """
-    N = 1000
+    N = 10000
     # GTの設定(デモ用にdaをGTとする)
     gt = set_gt(N)
     # DAの設定
@@ -340,9 +303,16 @@ def demo():
     time0 = time.time()
     # 復元
     loss_history = None
-    x_rest, loss_history = restore_1d(pd, da, lam=200.0, lr=1, num_iters=800, threshold=8.0, verbose=True)
+    x_rest, loss_history = restore_1d(pd, da, lam=100.0, lr=3, num_iters=3000, threshold=100.0, verbose=True)
     # x_rest = restore_1d_filter(pd, da, lam=500.0, threshold=8.0, num_passes=10, clip_range=None)
-    # x_rest = restore_1d_filter_fast(pd, da, lam=500.0, threshold=8.0, num_passes=100, clip_range=None)
+    # x_rest = restore_1d_filter_fast(pd, da, lam=1000, threshold=100.0, num_passes=10, clip_range=None)
+
+    # GTとの誤差評価
+    mse_pd = np.mean((pd - gt) ** 2)
+    mse_da = np.mean((da - gt) ** 2)
+    mse_rest = np.mean((x_rest - gt) ** 2)
+    print(f"MSE pd: {mse_pd:.3f}, da: {mse_da:.3f}, restored: {mse_rest:.3f}")
+
     print(f"Total elapsed time: {time.time() - time0:.3f} sec")
 
     # プロット表示
@@ -357,13 +327,13 @@ def demo():
     plt.ylabel('Depth Value')
     plt.grid()
 
-    if loss_history is not None:
-        plt.figure(figsize=(6,4))
-        plt.plot(loss_history)
-        plt.title('Loss History')
-        plt.xlabel('Iteration')
-        plt.ylabel('Loss')
-        plt.grid()
+    # if loss_history is not None:
+    #     plt.figure(figsize=(6,4))
+    #     plt.plot(loss_history)
+    #     plt.title('Loss History')
+    #     plt.xlabel('Iteration')
+    #     plt.ylabel('Loss')
+    #     plt.grid()
     plt.show()
 
 if __name__ == "__main__":
