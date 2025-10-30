@@ -18,15 +18,17 @@ def set_pd(gt):
     pd: gt をぼかし＋量子化＋ノイズ
     """
     np.random.seed(1)
-    # ぼかし
-    kernel_size = 5
-    kernel = np.ones(kernel_size) / kernel_size
+    # 1/10に縮小, データ数も削減
     pd = gt.copy()
-    pd = np.convolve(pd, kernel, mode='same')
+    pd = np.convolve(pd, np.ones(10)/10, mode='same')
+    pd = pd[::10]
     # 量子化
     pd = np.round(pd / 5.0) * 5.0
     # ノイズ
-    pd += np.random.normal(0, 2.0, size=len(pd)).astype(np.float32)
+    pd += np.random.normal(0, 1.0, size=len(pd)).astype(np.float32)
+
+    # 元のサイズにbiqubic補間拡大
+    pd = np.interp(np.arange(len(gt)), np.linspace(0, len(gt)-1, num=len(pd)), pd)
     return pd
 
 def set_da(gt):
