@@ -1,19 +1,23 @@
 import numpy as np
 
 
-def set_gt(N, H, W):
+def set_gt_img(H, W):
     """
     デモ用のGT画像を設定
     gt: 段差を含む画像
     """
     ww = W // 5
+    hh = H // 5
     gt_img = np.zeros((H, W), dtype=np.float32)
     for i in range(ww):
-        gt_img[:, ww + i] = 30 + 15.0 * np.sin(np.pi * i / ww)  # 半円形
-        gt_img[:, 3*ww + i] = 30 + 15.0 * np.sin(np.pi * i / ww)  # 半円形
+        for j in range(ww):
+            if (ww + j < H) and (ww + i < W):
+                gt_img[hh + j, ww + i] = 30 + 15.0 * np.sin(np.pi * i / ww)  # 半円形
+            if (2*ww+5 + j < H) and (3*ww + i < W):
+                gt_img[2*hh+5 + j, 3*ww + i] = 30 + 15.0 * np.sin(np.pi * i / ww)  # 半円形
     return gt_img
 
-def set_pd(gt_img):
+def set_pd_img(gt_img):
     """
     デモ用の観測画像 pd を設定
     pd: gt をぼかし＋量子化＋ノイズ
@@ -37,7 +41,7 @@ def set_pd(gt_img):
         pd_img_resized[i, :] = np.interp(x_new, x_old, pd_img[i, :])
     return pd_img_resized
 
-def set_da(gt_img):
+def set_da_img(gt_img):
     """
     デモ用のガイド画像 da を設定
     da: gt の後ろ半分の段差を10低くする
