@@ -277,7 +277,7 @@ def restore_2d_mg(pd, da, lam=100.0, threshold=1.0,
 
 
 # ====== デモ用（簡易トイ画像） ======
-def _toy_image(H=2048, W=4096, seed=0):
+def _toy_image(H=512, W=512, seed=0):
     rng = np.random.RandomState(seed)
     gt = np.zeros((H, W), dtype=np.float32)
     gt[H//8:3*H//8, W//8:3*W//8] = 1.0
@@ -293,11 +293,11 @@ def _toy_image(H=2048, W=4096, seed=0):
 if __name__ == "__main__":
     try:
         from set_data_2d import set_gt_img, set_pd_img, set_da_img
-        H, W = 1024, 1536
+        H, W = 1026, 2048
         gt = set_gt_img(H, W); da = set_da_img(gt); pd = set_pd_img(gt)
     except Exception:
         print("set_data_2d.py not found, using toy data.")
-        gt, pd, da = _toy_image(512, 512)
+        gt, pd, da = _toy_image(2048, 4096)
 
 
     # lamの目安：強めに正則化すると伝搬が安定（画像なら ~max(H,W)〜5*max(H,W) を試す）
