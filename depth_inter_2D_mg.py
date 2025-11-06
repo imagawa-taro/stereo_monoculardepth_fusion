@@ -1,10 +1,11 @@
 import numpy as np
+from typing import Tuple, List, Optional
 import time
 
 
 # ====== 2D ヘルパ ======
 
-def make_weights_2d(da, threshold=1.0, eps_small=1e-3):
+def make_weights_2d(da: np.ndarray, threshold: float = 1.0, eps_small: float = 1e-3) -> Tuple[np.ndarray, np.ndarray]:
     """
     ガイド画像daの勾配に応じて異方性重みを作る。
     - 横方向(wx): daのx差分に基づき、強いエッジでは小さく
@@ -32,7 +33,7 @@ def make_weights_2d(da, threshold=1.0, eps_small=1e-3):
 
     return wx, wy
 
-def compute_b_2d(J1, J2, wx, wy):
+def compute_b_2d(J1: np.ndarray, J2: np.ndarray, wx: np.ndarray, wy: np.ndarray) -> np.ndarray:
     """
     b = J1 - div( wx * ∂x J2 + wy * ∂y J2 )（Neumann境界：外側フラックス0）
     ∂x,∂yは前進差分、divは後退差分（qの外側は0パディング）
@@ -60,7 +61,7 @@ def compute_b_2d(J1, J2, wx, wy):
 
     return J1 - (div_x + div_y)
 
-def apply_A_2d(x, wx, wy):
+def apply_A_2d(x: np.ndarray, wx: np.ndarray, wy: np.ndarray) -> np.ndarray:
     """
     A x = x - div( wx * ∂x x + wy * ∂y x )
     Neumann境界：外側フラックス0
@@ -81,7 +82,14 @@ def apply_A_2d(x, wx, wy):
     div_y = qypad[1:, :] - qypad[:-1, :]
     return x - (div_x + div_y)
 
-def jacobi_smooth_2d(x, b, wx, wy, iters=1, omega=0.9):
+def jacobi_smooth_2d(
+    x: np.ndarray,
+    b: np.ndarray,
+    wx: np.ndarray,
+    wy: np.ndarray,
+    iters: int = 1,
+    omega: float = 0.9
+) -> np.ndarray:
     """
     重み付きJacobiスムーザー（Neumann）
     2Dの5点ステンシル：
@@ -112,7 +120,7 @@ def jacobi_smooth_2d(x, b, wx, wy, iters=1, omega=0.9):
     return x
 
 # ====== 2D マルチグリッド ======
-def smooth_downsample_2d(arr):
+def smooth_downsample_2d(arr: np.ndarray) -> np.ndarray:
     """
     2Dの3x3平滑（[1,2,1;2,4,2;1,2,1]/16）＋2倍間引き（端は複製）
     """
@@ -135,7 +143,7 @@ def smooth_downsample_2d(arr):
     sm = 0.25 * b[:, :-2] + 0.5 * b[:, 1:-1] + 0.25 * b[:, 2:]
     return sm[::2, ::2].copy()
 
-def prolong_bilinear_2d(coarse, fine_shape):
+def prolong_bilinear_2d(coarse: np.ndarray, fine_shape: Tuple[int, int]) -> np.ndarray:
     """
     2Dのバイリニア補間延長。coarse(Hc,Wc) → fine(Hf,Wf)（おおむね2倍）
     """
@@ -172,7 +180,11 @@ def prolong_bilinear_2d(coarse, fine_shape):
         out = np.concatenate([out, pad_cols], axis=1)
     return out[:Hf, :Wf].copy()
 
-def build_weight_pyramid_2d(wx0, wy0, max_levels=None):
+def build_weight_pyramid_2d(
+    wx0: np.ndarray,
+    wy0: np.ndarray,
+    max_levels: Optional[int] = None
+) -> Tuple[List[np.ndarray], List[np.ndarray]]:
     """
     wx/wyピラミッド（各レベルで 1/4 スケール）を作る
     """
@@ -193,7 +205,17 @@ def build_weight_pyramid_2d(wx0, wy0, max_levels=None):
         L += 1
     return wx_levels, wy_levels
 
-def v_cycle_2d(x, b, wx_levels, wy_levels, level=0, pre=2, post=2, omega=0.9, coarse_iters=40):
+def v_cycle_2d(
+    x: np.ndarray,
+    b: np.ndarray,
+    wx_levels: List[np.ndarray],
+    wy_levels: List[np.ndarray],
+    level: int = 0,
+    pre: int = 2,
+    post: int = 2,
+    omega: float = 0.9,
+    coarse_iters: int = 40
+) -> np.ndarray:
     """
     2D Vサイクル（誤差方程式の標準実装）
     - x: 現レベルの解画像
@@ -229,9 +251,20 @@ def v_cycle_2d(x, b, wx_levels, wy_levels, level=0, pre=2, post=2, omega=0.9, co
     x = jacobi_smooth_2d(x, b, wx, wy, iters=post, omega=omega)
     return x
 
-def restore_2d_mg(pd, da, lam=100.0, threshold=1.0,
-                  levels=None, cycles=2, pre=2, post=2, omega=0.9, coarse_iters=40,
-                  clip_range=None, verbose=True):
+def restore_2d_mg(
+    pd: np.ndarray,
+    da: np.ndarray,
+    lam: float = 100.0,
+    threshold: float = 1.0,
+    levels: Optional[int] = None,
+    cycles: int = 2,
+    pre: int = 2,
+    post: int = 2,
+    omega: float = 0.9,
+    coarse_iters: int = 40,
+    clip_range: Optional[Tuple[float, float]] = None,
+    verbose: bool = True
+) -> np.ndarray:
     """
     2Dマルチグリッド解法（Vサイクル×cycles）
     - A x = b, A = I - div(wx ∂x· + wy ∂y·), wx = lam * Wx, wy = lam * Wy
